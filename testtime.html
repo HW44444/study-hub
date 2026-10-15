@@ -1,0 +1,240 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Study Hub — Test Time</title>
+<link rel="stylesheet" href="style.css">
+</head>
+<body>
+
+<nav>
+  <a class="logo" href="index.html">📚 Study Hub</a>
+  <div class="links">
+    <a href="index.html">Dashboard</a>
+    <a href="planner.html">Session</a>
+    <a href="testtime.html">Test Time</a>
+    <a href="assignments.html">Assignments</a>
+    <a href="grades.html">Grades</a>
+  </div>
+</nav>
+
+<main>
+
+  <!-- ============ SETUP ============ -->
+  <div id="setup">
+    <h1>Test Time</h1>
+    <p class="sub">A simple repeating timer: study, break, repeat. No plan needed.</p>
+
+    <div class="panel">
+      <div class="grid" style="grid-template-columns:repeat(auto-fit,minmax(150px,1fr));">
+        <div>
+          <label class="meta" for="studyMins">Study time</label>
+          <span class="with-unit" style="display:flex; margin-top:5px;">
+            <input type="number" id="studyMins" min="1" max="240" value="25">
+            <span class="unit">min</span>
+          </span>
+        </div>
+        <div>
+          <label class="meta" for="breakMins">Break time</label>
+          <span class="with-unit" style="display:flex; margin-top:5px;">
+            <input type="number" id="breakMins" min="1" max="120" value="5">
+            <span class="unit">min</span>
+          </span>
+        </div>
+        <div>
+          <label class="meta" for="cycles">Repeat</label>
+          <span class="with-unit" style="display:flex; margin-top:5px;">
+            <input type="number" id="cycles" min="1" max="20" value="4">
+            <span class="unit">×</span>
+          </span>
+        </div>
+      </div>
+
+      <label class="choose-row" style="border:none; margin-top:12px;">
+        <input type="checkbox" id="endless">
+        <span>
+          <span class="choose-label">Keep going until I stop it</span>
+          <span class="choose-sub">Ignores the repeat count and cycles forever</span>
+        </span>
+      </label>
+
+      <div class="row" style="margin-top:12px;">
+        <button id="startBtn">▶ Start</button>
+      </div>
+      <p class="sub" id="summary" style="margin:12px 0 0;"></p>
+    </div>
+  </div>
+
+  <!-- ============ RUNNING ============ -->
+  <div id="running" style="display:none;">
+    <div class="panel runner">
+      <div class="task" id="phaseLabel">Study</div>
+      <div class="clock" id="clock">00:00</div>
+      <div class="bar"><div id="barFill"></div></div>
+      <div class="upnext" id="cycleLabel"></div>
+      <div class="row" style="justify-content:center; margin-top:20px;">
+        <button id="pauseBtn">Pause</button>
+        <button class="ghost" id="skipBtn">Skip →</button>
+        <button class="ghost" id="stopBtn">End session</button>
+      </div>
+    </div>
+  </div>
+
+</main>
+
+<script src="storage.js"></script>
+<script src="ui.js"></script>
+<script>
+/* ===================== STATE ===================== */
+let studyMins = 25, breakMins = 5, totalCycles = 4, endless = false;
+
+let onBreak = false;     // which phase we're in
+let cycle = 1;           // which repeat we're on
+let endTime = 0;
+let remaining = 0;
+let ticker = null;
+let paused = false;
+let studiedMinutes = 0;  // only study phases count toward the log
+
+/* ===================== SETUP ===================== */
+const ids = ["studyMins", "breakMins", "cycles", "endless"];
+ids.forEach(id => document.getElementById(id).addEventListener("input", updateSummary));
+
+function updateSummary() {
+  const s = +document.getElementById("studyMins").value || 0;
+  const b = +document.getElementById("breakMins").value || 0;
+  const c = +document.getElementById("cycles").value || 0;
+  const forever = document.getElementById("endless").checked;
+  document.getElementById("cycles").disabled = forever;
+
+  document.getElementById("summary").textContent = forever
+    ? `${s} min study / ${b} min break, repeating until you stop.`
+    : `${c} cycles · ${formatMinutes(c * (s + b))} total · ${formatMinutes(c * s)} of studying.`;
+}
+
+document.getElementById("startBtn").addEventListener("click", async () => {
+  studyMins = parseInt(document.getElementById("studyMins").value, 10);
+  breakMins = parseInt(document.getElementById("breakMins").value, 10);
+  totalCycles = parseInt(document.getElementById("cycles").value, 10);
+  endless = document.getElementById("endless").checked;
+
+  if (!studyMins || studyMins < 1) { await uiAlert("Study time must be at least 1 minute."); return; }
+  if (!breakMins || breakMins < 1) { await uiAlert("Break time must be at least 1 minute."); return; }
+  if (!endless && (!totalCycles || totalCycles < 1)) { await uiAlert("Repeat must be at least 1."); return; }
+
+  onBreak = false;
+  cycle = 1;
+  studiedMinutes = 0;
+  document.getElementById("setup").style.display = "none";
+  document.getElementById("running").style.display = "block";
+  startPhase();
+});
+
+/* ===================== TIMER ===================== */
+function startPhase() {
+  const mins = onBreak ? breakMins : studyMins;
+  document.getElementById("phaseLabel").textContent = onBreak ? "Break" : "Study";
+  document.getElementById("cycleLabel").textContent =
+    endless ? `Cycle ${cycle}` : `Cycle ${cycle} of ${totalCycles}`;
+
+  remaining = mins * 60;
+  endTime = Date.now() + remaining * 1000;
+  paused = false;
+  document.getElementById("pauseBtn").textContent = "Pause";
+
+  clearInterval(ticker);
+  ticker = setInterval(tick, 250);
+  tick();
+}
+
+function tick() {
+  if (paused) return;
+  remaining = Math.max(0, Math.round((endTime - Date.now()) / 1000));
+  draw();
+  if (remaining <= 0) { beep(); advance(); }
+}
+
+/* Study -> break -> next cycle's study -> ... */
+function advance() {
+  if (!onBreak) {
+    studiedMinutes += studyMins;      // a study phase just finished
+    onBreak = true;
+    startPhase();
+  } else {
+    onBreak = false;
+    cycle++;
+    if (!endless && cycle > totalCycles) finish(true);
+    else startPhase();
+  }
+}
+
+function draw() {
+  const m = Math.floor(remaining / 60);
+  const s = remaining % 60;
+  const text = String(m).padStart(2, "0") + ":" + String(s).padStart(2, "0");
+  document.getElementById("clock").textContent = text;
+
+  const total = (onBreak ? breakMins : studyMins) * 60;
+  document.getElementById("barFill").style.width = ((total - remaining) / total) * 100 + "%";
+  document.title = `${text} — ${onBreak ? "Break" : "Study"}`;
+}
+
+document.getElementById("pauseBtn").addEventListener("click", () => {
+  paused = !paused;
+  document.getElementById("pauseBtn").textContent = paused ? "Resume" : "Pause";
+  if (!paused) endTime = Date.now() + remaining * 1000;
+});
+
+document.getElementById("skipBtn").addEventListener("click", () => {
+  // Skipping a study phase still counts the part you actually did.
+  if (!onBreak) {
+    const doneMins = studyMins - Math.ceil(remaining / 60);
+    studiedMinutes += Math.max(0, doneMins);
+    onBreak = true;
+    startPhase();
+  } else {
+    onBreak = false;
+    cycle++;
+    if (!endless && cycle > totalCycles) finish(true);
+    else startPhase();
+  }
+});
+
+document.getElementById("stopBtn").addEventListener("click", async () => {
+  // Count the current study phase up to this moment.
+  if (!onBreak) studiedMinutes += Math.max(0, studyMins - Math.ceil(remaining / 60));
+  if (await uiConfirm("End this session?", "End session", "End")) finish(false);
+});
+
+async function finish(completed) {
+  clearInterval(ticker);
+  document.title = "Study Hub";
+  if (studiedMinutes > 0) logStudyTime(studiedMinutes);
+
+  document.getElementById("running").style.display = "none";
+  document.getElementById("setup").style.display = "block";
+
+  await uiAlert(
+    `You studied ${formatMinutes(studiedMinutes)}.`,
+    completed ? "All cycles complete" : "Session ended"
+  );
+}
+
+function beep() {
+  try {
+    const ctx = new (window.AudioContext || window.webkitAudioContext)();
+    const osc = ctx.createOscillator();
+    const gain = ctx.createGain();
+    osc.connect(gain); gain.connect(ctx.destination);
+    osc.frequency.value = onBreak ? 660 : 880;   // different tone per phase
+    gain.gain.setValueAtTime(0.25, ctx.currentTime);
+    gain.gain.exponentialRampToValueAtTime(0.001, ctx.currentTime + 0.6);
+    osc.start(); osc.stop(ctx.currentTime + 0.6);
+  } catch (e) { /* audio blocked — fine */ }
+}
+
+updateSummary();
+</script>
+</body>
+</html>

@@ -1,0 +1,315 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Study Hub — Assignments</title>
+<link rel="stylesheet" href="style.css">
+</head>
+<body>
+
+<nav>
+  <a class="logo" href="index.html">📚 Study Hub</a>
+  <div class="links">
+    <a href="index.html">Dashboard</a>
+    <a href="planner.html">Session</a>
+    <a href="testtime.html">Test Time</a>
+    <a href="assignments.html">Assignments</a>
+    <a href="grades.html">Grades</a>
+  </div>
+</nav>
+
+<main>
+  <h1>Assignments</h1>
+  <p class="sub">Everything you owe, sorted by what's due soonest.</p>
+
+  <div class="panel">
+    <div class="row">
+      <label class="sr-only" for="title">Assignment</label>
+      <input type="text" id="title" placeholder="Assignment" style="flex:2; min-width:170px;">
+      <label class="sr-only" for="className">Class</label>
+      <input type="text" id="className" placeholder="Class" style="flex:1; min-width:110px;">
+      <label class="sr-only" for="due">Due date</label>
+      <input type="date" id="due">
+      <button id="add">Add</button>
+    </div>
+  </div>
+
+  <!-- ============ SCHEDULE IMPORTER ============ -->
+  <div class="panel">
+    <h2>Import a schedule</h2>
+    <p class="sub" style="margin-bottom:12px;">
+      Open your homework schedule (Google Doc, syllabus, anything), select the text, copy it,
+      and paste it below. Each line with a date becomes an assignment.
+    </p>
+
+    <div class="row" style="margin-bottom:10px;">
+      <label class="sr-only" for="importClass">Class for imported items</label>
+      <input type="text" id="importClass" placeholder="Class for these (e.g. Math)" style="flex:1; min-width:170px;">
+      <button id="parseBtn">Preview</button>
+    </div>
+
+    <label class="sr-only" for="importText">Paste your schedule</label>
+    <textarea id="importText" rows="6" style="width:100%;"
+      placeholder="10/20  Section 3.4 — problems 1-15&#10;Oct 22: Quiz on derivatives&#10;10/24/26 Chapter 3 review"></textarea>
+
+    <div id="previewWrap" style="display:none; margin-top:14px;">
+      <div id="previewBody"></div>
+      <div class="row" style="margin-top:12px;">
+        <button id="importBtn">Import selected</button>
+        <button class="ghost" id="cancelImport">Cancel</button>
+      </div>
+    </div>
+  </div>
+
+  <div class="panel">
+    <h2>To do</h2>
+    <div id="todo"></div>
+  </div>
+
+  <div class="panel">
+    <h2>Completed</h2>
+    <div id="done"></div>
+  </div>
+</main>
+
+<script src="storage.js"></script>
+<script src="ui.js"></script>
+<script>
+let items = load(KEYS.assignments, []);
+
+/* ===================== LIST ===================== */
+function render() {
+  items.sort((a, b) => (a.due || "9999").localeCompare(b.due || "9999"));
+
+  const todoEl = document.getElementById("todo");
+  const doneEl = document.getElementById("done");
+  todoEl.innerHTML = ""; doneEl.innerHTML = "";
+
+  const todo = items.filter(i => !i.done);
+  const done = items.filter(i => i.done);
+
+  if (todo.length === 0) todoEl.innerHTML = `<p class="empty">Nothing due. Nice.</p>`;
+  if (done.length === 0) doneEl.innerHTML = `<p class="empty">Nothing completed yet.</p>`;
+
+  todo.forEach(item => todoEl.appendChild(rowFor(item)));
+  done.forEach(item => doneEl.appendChild(rowFor(item)));
+
+  save(KEYS.assignments, items);
+}
+
+function rowFor(item) {
+  const row = document.createElement("div");
+  row.className = "item" + (item.done ? " done" : "");
+
+  let pill = "";
+  if (item.due && !item.done) {
+    const d = daysUntil(item.due);
+    if (d < 0)        pill = `<span class="pill late">${-d}d overdue</span>`;
+    else if (d === 0) pill = `<span class="pill late">Due today</span>`;
+    else if (d <= 3)  pill = `<span class="pill soon">${d}d left</span>`;
+    else              pill = `<span class="pill ok">${d}d left</span>`;
+  }
+
+  row.innerHTML = `
+    <input type="checkbox" ${item.done ? "checked" : ""} data-check="${item.id}"
+           aria-label="Mark ${escapeHtml(item.title)} complete">
+    <div class="grow">
+      <div class="title">${escapeHtml(item.title)}</div>
+      <div class="meta">${escapeHtml(item.className || "—")}${item.due ? " · " + prettyDate(item.due) : ""}</div>
+    </div>
+    ${pill}
+    <button class="danger" data-del="${item.id}" aria-label="Delete assignment">✕</button>`;
+  return row;
+}
+
+/* ===================== ADD ===================== */
+document.getElementById("add").addEventListener("click", add);
+document.getElementById("title").addEventListener("keydown", e => { if (e.key === "Enter") add(); });
+
+async function add() {
+  const titleEl = document.getElementById("title");
+  const title = titleEl.value.trim();
+  if (!title) { await uiAlert("Name the assignment first."); titleEl.focus(); return; }
+  items.push({
+    id: uid(),
+    title,
+    className: document.getElementById("className").value.trim(),
+    due: document.getElementById("due").value,
+    done: false
+  });
+  titleEl.value = "";
+  titleEl.focus();
+  render();
+  uiToast("Assignment added", "good");
+}
+
+document.body.addEventListener("click", async e => {
+  const el = e.target;
+  if (el.dataset.check !== undefined) {
+    const item = items.find(i => i.id === el.dataset.check);
+    if (item) item.done = el.checked;
+    render();
+  }
+  if (el.dataset.del !== undefined) {
+    const item = items.find(i => i.id === el.dataset.del);
+    if (item && await uiConfirm(`Delete "${item.title}"?`, "Delete assignment", "Delete")) {
+      items = items.filter(i => i.id !== el.dataset.del);
+      render();
+      uiToast("Deleted");
+    }
+  }
+});
+
+/* ============================================================
+   SCHEDULE PARSER
+
+   Takes pasted text and pulls a date + a label out of each line.
+   Handles the formats a homework schedule actually uses:
+     10/20            10/20/26          2026-10-20
+     Oct 20           October 20        Mon 10/20 — Section 3.4
+   ============================================================ */
+const MONTHS = { jan:1, feb:2, mar:3, apr:4, may:5, jun:6,
+                 jul:7, aug:8, sep:9, oct:10, nov:11, dec:12 };
+
+function pad(n) { return String(n).padStart(2, "0"); }
+function isoFrom(y, m, d) { return `${y}-${pad(m)}-${pad(d)}`; }
+
+/* A schedule usually has no year on it. If the date already
+   passed months ago it almost certainly means next year
+   (a spring semester listed in the fall), so shift it. */
+function inferYear(month, day) {
+  const now = new Date();
+  let year = now.getFullYear();
+  const diffDays = (new Date(year, month - 1, day) - now) / 86400000;
+  if (diffDays < -180) year += 1;
+  else if (diffDays > 300) year -= 1;
+  return year;
+}
+
+function validDate(y, m, d) {
+  if (m < 1 || m > 12 || d < 1 || d > 31) return false;
+  const dt = new Date(y, m - 1, d);
+  return dt.getMonth() === m - 1 && dt.getDate() === d;   // rejects Feb 30 etc.
+}
+
+function parseLine(line) {
+  const raw = line.trim();
+  if (!raw) return null;
+
+  let date = null, matched = "";
+
+  // 1) ISO  2026-10-20
+  let m = raw.match(/\b(\d{4})-(\d{1,2})-(\d{1,2})\b/);
+  if (m && validDate(+m[1], +m[2], +m[3])) {
+    date = isoFrom(+m[1], +m[2], +m[3]); matched = m[0];
+  }
+
+  // 2) Numeric  10/20  or  10/20/26
+  if (!date) {
+    m = raw.match(/\b(\d{1,2})\/(\d{1,2})(?:\/(\d{2,4}))?\b/);
+    if (m) {
+      const mo = +m[1], d = +m[2];
+      const y = m[3] ? (+m[3] < 100 ? 2000 + +m[3] : +m[3]) : inferYear(mo, d);
+      if (validDate(y, mo, d)) { date = isoFrom(y, mo, d); matched = m[0]; }
+    }
+  }
+
+  // 3) Month name  Oct 20 / October 20
+  if (!date) {
+    m = raw.match(/\b(jan|feb|mar|apr|may|jun|jul|aug|sep|oct|nov|dec)[a-z]*\.?\s+(\d{1,2})\b/i);
+    if (m) {
+      const mo = MONTHS[m[1].toLowerCase()], d = +m[2];
+      const y = inferYear(mo, d);
+      if (validDate(y, mo, d)) { date = isoFrom(y, mo, d); matched = m[0]; }
+    }
+  }
+
+  if (!date) return null;   // no date on this line — skip it
+
+  // Whatever is left over, cleaned up, becomes the label.
+  const label = raw
+    .replace(matched, " ")
+    .replace(/\b(mon|tue|tues|wed|wedn|thu|thur|thurs|fri|sat|sun)[a-z]*\.?/i, " ")
+    .replace(/\s+/g, " ")
+    .replace(/^[\s\-–—:,.|•*]+/, "")
+    .replace(/[\s\-–—:,.|]+$/, "")
+    .trim();
+
+  if (!label) return null;  // a bare date with no description isn't useful
+  return { date, label };
+}
+
+/* ===================== IMPORT UI ===================== */
+let parsed = [];
+
+document.getElementById("parseBtn").addEventListener("click", async () => {
+  const text = document.getElementById("importText").value;
+
+  if (/^\s*https?:\/\//.test(text.trim())) {
+    await uiAlert(
+      "Paste the schedule's text, not its link. A web page can't read a Google Doc " +
+      "directly — open the doc, select all, copy, and paste it here.",
+      "Paste the text instead"
+    );
+    return;
+  }
+
+  parsed = text.split("\n").map(parseLine).filter(Boolean);
+
+  if (parsed.length === 0) {
+    await uiAlert(
+      "No dates found. Each line needs a date like 10/20, Oct 20, or 2026-10-20, " +
+      "followed by what's due.",
+      "Nothing to import"
+    );
+    return;
+  }
+
+  document.getElementById("previewBody").innerHTML = `
+    <p class="sub" style="margin:0 0 4px;">Found ${parsed.length} item${parsed.length === 1 ? "" : "s"}. Uncheck anything you don't want.</p>
+    <table class="preview">
+      <tr><th style="width:28px;"></th><th style="width:90px;">Due</th><th>Assignment</th></tr>
+      ${parsed.map((p, i) => `
+        <tr>
+          <td><input type="checkbox" data-row="${i}" checked aria-label="Import ${escapeHtml(p.label)}"></td>
+          <td>${prettyDate(p.date)}</td>
+          <td>${escapeHtml(p.label)}</td>
+        </tr>`).join("")}
+    </table>`;
+  document.getElementById("previewWrap").style.display = "block";
+});
+
+document.getElementById("cancelImport").addEventListener("click", () => {
+  document.getElementById("previewWrap").style.display = "none";
+  parsed = [];
+});
+
+document.getElementById("importBtn").addEventListener("click", () => {
+  const className = document.getElementById("importClass").value.trim();
+  const picked = [...document.querySelectorAll("[data-row]:checked")].map(c => parsed[+c.dataset.row]);
+
+  let added = 0, skipped = 0;
+  picked.forEach(p => {
+    // Don't create the same assignment twice if you import again.
+    const exists = items.some(i => i.title === p.label && i.due === p.date);
+    if (exists) { skipped++; return; }
+    items.push({ id: uid(), title: p.label, className, due: p.date, done: false });
+    added++;
+  });
+
+  document.getElementById("previewWrap").style.display = "none";
+  document.getElementById("importText").value = "";
+  parsed = [];
+  render();
+
+  uiToast(
+    `Imported ${added}` + (skipped ? ` · skipped ${skipped} duplicate${skipped === 1 ? "" : "s"}` : ""),
+    added ? "good" : null
+  );
+});
+
+render();
+</script>
+</body>
+</html>

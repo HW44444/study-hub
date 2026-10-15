@@ -1,0 +1,184 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Study Hub — Grades</title>
+<link rel="stylesheet" href="style.css">
+</head>
+<body>
+
+<nav>
+  <a class="logo" href="index.html">📚 Study Hub</a>
+  <div class="links">
+    <a href="index.html">Dashboard</a>
+    <a href="planner.html">Session</a>
+    <a href="testtime.html">Test Time</a>
+    <a href="assignments.html">Assignments</a>
+    <a href="grades.html">Grades</a>
+  </div>
+</nav>
+
+<main>
+  <h1>Grades</h1>
+  <p class="sub">Change a grade right in the list — the GPA updates instantly.</p>
+
+  <!-- ===== GPA stays at the top ===== -->
+  <div class="grid stats" style="margin-bottom:18px;">
+    <div class="stat"><div class="label">Unweighted GPA</div><div class="value" id="uw">—</div></div>
+    <div class="stat"><div class="label">Weighted GPA</div><div class="value" id="w">—</div></div>
+  </div>
+
+  <div class="panel">
+    <h2>Your classes</h2>
+    <div id="list"></div>
+  </div>
+
+  <!-- ===== Add form moved to the bottom ===== -->
+  <div class="panel">
+    <h2>Add a class</h2>
+    <div class="row">
+      <label class="sr-only" for="cname">Class name</label>
+      <input type="text" id="cname" placeholder="Class name" style="flex:2; min-width:160px;">
+
+      <label class="sr-only" for="cgrade">Grade</label>
+      <select id="cgrade">
+        <option>A+</option><option selected>A</option><option>A-</option>
+        <option>B+</option><option>B</option><option>B-</option>
+        <option>C+</option><option>C</option><option>C-</option>
+        <option>D+</option><option>D</option><option>D-</option>
+        <option>F</option>
+      </select>
+
+      <label class="sr-only" for="ctype">Course type</label>
+      <select id="ctype">
+        <option value="regular">Regular</option>
+        <option value="honors">Honors</option>
+        <option value="ap">AP</option>
+      </select>
+
+      <button id="add">Add class</button>
+    </div>
+  </div>
+</main>
+
+<script src="storage.js"></script>
+<script src="ui.js"></script>
+<script>
+const GRADE_POINTS = {
+  "A+":4.0,"A":4.0,"A-":3.7,
+  "B+":3.3,"B":3.0,"B-":2.7,
+  "C+":2.3,"C":2.0,"C-":1.7,
+  "D+":1.3,"D":1.0,"D-":0.7,
+  "F":0.0
+};
+const WEIGHT = { regular:0.0, honors:0.5, ap:1.0 };
+const LABEL  = { regular:"Regular", honors:"Honors", ap:"AP" };
+const GRADES = Object.keys(GRADE_POINTS);
+const TYPES  = Object.keys(WEIGHT);
+
+let classes = load(KEYS.classes, []);
+
+function render() {
+  const list = document.getElementById("list");
+  list.innerHTML = "";
+
+  if (classes.length === 0) {
+    list.innerHTML = `<p class="empty">No classes yet. Add one below.</p>`;
+    document.getElementById("uw").textContent = "—";
+    document.getElementById("w").textContent  = "—";
+    save(KEYS.classes, classes);
+    return;
+  }
+
+  let uwSum = 0, wSum = 0;
+
+  classes.forEach(c => {
+    const base  = GRADE_POINTS[c.grade] ?? 0;
+    const bonus = base > 0 ? WEIGHT[c.type] : 0;   // no bonus on a failing grade
+    uwSum += base;
+    wSum  += base + bonus;
+
+    // Build <option> lists with the current value preselected,
+    // so the dropdown opens showing what the class is set to.
+    const gradeOpts = GRADES.map(g =>
+      `<option ${g === c.grade ? "selected" : ""}>${g}</option>`).join("");
+    const typeOpts = TYPES.map(t =>
+      `<option value="${t}" ${t === c.type ? "selected" : ""}>${LABEL[t]}</option>`).join("");
+
+    const row = document.createElement("div");
+    row.className = "item";
+    row.innerHTML = `
+      <div class="grow">
+        <div class="title">${escapeHtml(c.name)}</div>
+        <div class="meta">${base.toFixed(1)} pts${bonus ? " + " + bonus + " weighted" : ""}</div>
+      </div>
+      <select class="inline" data-grade="${c.id}" aria-label="Grade for ${escapeHtml(c.name)}">${gradeOpts}</select>
+      <select class="inline" data-type="${c.id}" aria-label="Course type for ${escapeHtml(c.name)}">${typeOpts}</select>
+      <button class="danger" data-del="${c.id}" aria-label="Remove ${escapeHtml(c.name)}">✕</button>`;
+    list.appendChild(row);
+  });
+
+  document.getElementById("uw").textContent = (uwSum / classes.length).toFixed(2);
+  document.getElementById("w").textContent  = (wSum  / classes.length).toFixed(2);
+  save(KEYS.classes, classes);
+}
+
+/* ---------- Add ---------- */
+document.getElementById("add").addEventListener("click", add);
+document.getElementById("cname").addEventListener("keydown", e => { if (e.key === "Enter") add(); });
+
+async function add() {
+  const nameEl = document.getElementById("cname");
+  const name = nameEl.value.trim();
+  if (!name) { await uiAlert("Give the class a name first."); nameEl.focus(); return; }
+
+  classes.push({
+    id: uid(),
+    name: name,
+    grade: document.getElementById("cgrade").value,
+    type: document.getElementById("ctype").value
+  });
+
+  // Reset the form back to its defaults so the next entry
+  // doesn't accidentally inherit the last one's settings.
+  nameEl.value = "";
+  document.getElementById("cgrade").value = "A";
+  document.getElementById("ctype").value = "regular";
+  nameEl.focus();
+
+  render();
+  uiToast(`Added ${name}`, "good");
+}
+
+/* ---------- Inline editing ----------
+   "change" fires when a dropdown value changes. We find which
+   class it belongs to from the data- attribute and update it. */
+document.getElementById("list").addEventListener("change", e => {
+  const el = e.target;
+  const id = el.dataset.grade || el.dataset.type;
+  if (!id) return;
+  const cls = classes.find(c => c.id === id);
+  if (!cls) return;
+  if (el.dataset.grade) cls.grade = el.value;
+  if (el.dataset.type)  cls.type  = el.value;
+  render();
+});
+
+/* ---------- Delete ---------- */
+document.getElementById("list").addEventListener("click", async e => {
+  const btn = e.target.closest("button[data-del]");
+  if (!btn) return;
+  const cls = classes.find(c => c.id === btn.dataset.del);
+  if (!cls) return;
+  if (await uiConfirm(`Remove ${cls.name} from your classes?`, "Remove class", "Remove")) {
+    classes = classes.filter(c => c.id !== btn.dataset.del);
+    render();
+    uiToast("Class removed");
+  }
+});
+
+render();
+</script>
+</body>
+</html>
