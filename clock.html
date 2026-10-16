@@ -156,7 +156,7 @@ function paint() {
   renderDay(st);
 
   document.getElementById("rotationNote").textContent = st.dayType
-    ? `Today is an ${st.dayType} day.`
+    ? `Today is ${st.dayType === "A" ? "an" : "a"} ${st.dayType} day.`
     : sched.anchorDate ? "No school today, so there's no A/B day."
                        : "Not set yet — tap whichever today is.";
 
