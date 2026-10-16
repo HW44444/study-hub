@@ -18,6 +18,11 @@
 
 const SCHED_KEY = "sh_schedule";
 
+/* Bumping this re-seeds the saved bell times from the defaults
+   below. Without it, a browser that already saved the old
+   schedule would keep showing it forever. */
+const SCHED_VERSION = 2;
+
 /* ---------- The real bell schedules ---------- */
 const DEFAULT_TEMPLATES = {
   standard: {
@@ -39,8 +44,9 @@ const DEFAULT_TEMPLATES = {
       { label: "Period 2",                     start: "10:05", end: "11:30", slot: 2 },
       { label: "Lunch",                        start: "11:30", end: "12:05", slot: null },
       { label: "Period 3",                     start: "12:10", end: "13:35", slot: 3 },
-      { label: "Period 4",                     start: "13:40", end: "15:05", slot: 4 },
-      { label: "PLC",                          start: "15:15", end: "16:00", slot: null }
+      { label: "Period 4",                     start: "13:40", end: "15:05", slot: 4 }
+      /* PLC (3:15–4:00) is teacher time, not a student block,
+         so it's deliberately left out. */
     ]
   },
   friday: {
@@ -61,6 +67,7 @@ const DEFAULT_WEEKMAP = { 1: "standard", 2: "standard", 3: "standard", 4: "thurs
 
 function defaultSchedule() {
   return {
+    version: SCHED_VERSION,
     enabled: true,
     templates: JSON.parse(JSON.stringify(DEFAULT_TEMPLATES)),
     weekMap: { ...DEFAULT_WEEKMAP },
@@ -80,6 +87,16 @@ function loadSchedule() {
   }
   if (s.enabled === undefined) s.enabled = true;
   if (!s.weekMap) s.weekMap = { ...DEFAULT_WEEKMAP };
+
+  /* Bell times changed since this was saved — refresh them,
+     while keeping your A/B anchor, on/off state and any
+     custom day you've set up. */
+  if (s.version !== SCHED_VERSION) {
+    s.templates = JSON.parse(JSON.stringify(DEFAULT_TEMPLATES));
+    s.weekMap = { ...DEFAULT_WEEKMAP };
+    s.version = SCHED_VERSION;
+    save(SCHED_KEY, s);
+  }
   return s;
 }
 function saveSchedule(s) { save(SCHED_KEY, s); }

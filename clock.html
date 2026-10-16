@@ -70,22 +70,14 @@
       <button id="makeCustom">Use a custom schedule today</button>
       <button class="ghost" id="clearCustom" style="display:none;">Remove custom schedule</button>
     </div>
-  </div>
 
-  <!-- ===== Schedule editor ===== -->
-  <div class="panel">
-    <h2>Bell schedules</h2>
-    <p class="sub" style="margin-bottom:12px;">
-      Slot 1–4 are your class periods (A1–A4 on A days, B5–B8 on B days). Leave the slot blank for lunch, seminar, or PLC.
-    </p>
-    <div class="row" style="margin-bottom:12px;">
-      <label class="sr-only" for="whichSched">Schedule to edit</label>
-      <select id="whichSched" style="flex:1; min-width:220px;"></select>
-    </div>
-    <div id="blockEditor"></div>
-    <div class="row" style="margin-top:14px;">
-      <button id="addBlock">+ Add block</button>
-      <button class="ghost" id="resetBlocks">Reset this schedule</button>
+    <!-- Only appears once a custom schedule exists for today -->
+    <div id="customEditor" style="display:none; margin-top:16px;">
+      <p class="sub" style="margin-bottom:10px;">
+        Slot 1–4 are your class periods (A1–A4 on A days, B5–B8 on B days). Leave the slot blank for lunch or anything that isn't a class.
+      </p>
+      <div id="blockEditor"></div>
+      <button id="addBlock" style="margin-top:14px;">+ Add block</button>
     </div>
   </div>
 </main>
@@ -95,7 +87,12 @@
 <script src="schedule.js"></script>
 <script>
 let sched = loadSchedule();
-let editing = "auto";   // which schedule the editor is showing
+
+/* Today's one-off schedule, if there is one. */
+function todayOverride() {
+  const today = localISO(new Date());
+  return sched.override && sched.override.date === today ? sched.override : null;
+}
 
 /* ===================== LIVE STATUS ===================== */
 function paint() {
@@ -163,10 +160,10 @@ function paint() {
     : sched.anchorDate ? "No school today, so there's no A/B day."
                        : "Not set yet — tap whichever today is.";
 
-  const hasCustom = sched.override && sched.override.date === localISO(now);
+  const hasCustom = !!todayOverride();
   document.getElementById("clearCustom").style.display = hasCustom ? "" : "none";
-  document.getElementById("makeCustom").textContent =
-    hasCustom ? "Edit today's custom schedule" : "Use a custom schedule today";
+  document.getElementById("customEditor").style.display = hasCustom ? "" : "none";
+  document.getElementById("makeCustom").style.display = hasCustom ? "none" : "";
 }
 
 function renderDay(st) {
@@ -213,78 +210,42 @@ document.getElementById("setB").addEventListener("click", () => setToday("B"));
 
 /* ===================== CUSTOM DAY ===================== */
 document.getElementById("makeCustom").addEventListener("click", () => {
-  const today = localISO(new Date());
-  if (!sched.override || sched.override.date !== today) {
-    // Start from whatever today would normally be, so you're editing, not starting blank.
-    const base = blocksForDate(new Date());
-    sched.override = {
-      date: today,
-      name: "Custom schedule",
-      blocks: base ? JSON.parse(JSON.stringify(base.blocks)) : []
-    };
-    saveSchedule(sched);
-    uiToast("Custom schedule created for today", "good");
-  }
-  editing = "override";
-  fillSchedPicker();
+  // Start from whatever today would normally be, so you're editing, not starting blank.
+  const base = blocksForDate(new Date());
+  sched.override = {
+    date: localISO(new Date()),
+    name: "Custom schedule",
+    blocks: base ? JSON.parse(JSON.stringify(base.blocks)) : []
+  };
+  saveSchedule(sched);
   renderEditor();
   paint();
-  document.getElementById("blockEditor").scrollIntoView({ behavior: "smooth", block: "center" });
+  uiToast("Custom schedule created for today", "good");
 });
 
 document.getElementById("clearCustom").addEventListener("click", async () => {
   if (await uiConfirm("Remove today's custom schedule and go back to the normal one?", "Remove custom", "Remove")) {
     sched.override = null;
-    if (editing === "override") editing = "auto";
     saveSchedule(sched);
-    fillSchedPicker();
     renderEditor();
     paint();
     uiToast("Back to the normal schedule");
   }
 });
 
-/* ===================== EDITOR ===================== */
-function fillSchedPicker() {
-  const sel = document.getElementById("whichSched");
-  const opts = [`<option value="auto">Today's schedule</option>`];
-  Object.keys(sched.templates).forEach(k => {
-    opts.push(`<option value="${k}">${escapeHtml(sched.templates[k].name)}</option>`);
-  });
-  if (sched.override && sched.override.date === localISO(new Date())) {
-    opts.push(`<option value="override">Today's custom schedule</option>`);
-  }
-  sel.innerHTML = opts.join("");
-  sel.value = editing;
-  if (sel.value !== editing) { editing = "auto"; sel.value = "auto"; }
-}
+/* ===================== CUSTOM DAY EDITOR =====================
+   The editor only ever edits TODAY'S custom schedule. The normal
+   weekly bell times are fixed, so there's nothing else to edit. */
 
-/* Which array of blocks the editor is currently pointed at. */
 function editingBlocks() {
-  if (editing === "override" && sched.override) return sched.override.blocks;
-  if (editing !== "auto" && sched.templates[editing]) return sched.templates[editing].blocks;
-
-  // "auto" = whatever applies today
-  const today = localISO(new Date());
-  if (sched.override && sched.override.date === today) return sched.override.blocks;
-  const key = templateKeyForDate(new Date());
-  if (key && sched.templates[key]) return sched.templates[key].blocks;
-  return null;
+  const ov = todayOverride();
+  return ov ? ov.blocks : null;
 }
-
-document.getElementById("whichSched").addEventListener("change", e => {
-  editing = e.target.value;
-  renderEditor();
-});
 
 function renderEditor() {
   const wrap = document.getElementById("blockEditor");
   const blocks = editingBlocks();
-
-  if (!blocks) {
-    wrap.innerHTML = `<p class="empty">No schedule today (weekend). Pick a specific one above to edit it.</p>`;
-    return;
-  }
+  if (!blocks) { wrap.innerHTML = ""; return; }
 
   wrap.innerHTML = blocks.map((b, i) => `
     <div class="item">
@@ -337,7 +298,7 @@ document.getElementById("blockEditor").addEventListener("click", async e => {
 
 document.getElementById("addBlock").addEventListener("click", () => {
   const blocks = editingBlocks();
-  if (!blocks) { uiToast("Pick a schedule to edit first", "bad"); return; }
+  if (!blocks) return;
   blocks.push({ label: "New block", start: "15:30", end: "16:00", slot: null });
   blocks.sort((x, y) => toMinutes(x.start) - toMinutes(y.start));
   saveSchedule(sched);
@@ -345,24 +306,7 @@ document.getElementById("addBlock").addEventListener("click", () => {
   paint();
 });
 
-document.getElementById("resetBlocks").addEventListener("click", async () => {
-  let key = editing;
-  if (key === "auto") key = templateKeyForDate(new Date());
-  if (!key || key === "override" || !DEFAULT_TEMPLATES[key]) {
-    uiToast("Pick one of the weekly schedules to reset", "bad");
-    return;
-  }
-  if (await uiConfirm(`Reset "${sched.templates[key].name}" to the default bell times?`, "Reset schedule", "Reset")) {
-    sched.templates[key].blocks = JSON.parse(JSON.stringify(DEFAULT_TEMPLATES[key].blocks));
-    saveSchedule(sched);
-    renderEditor();
-    paint();
-    uiToast("Schedule reset");
-  }
-});
-
 /* ===================== INIT ===================== */
-fillSchedPicker();
 renderEditor();
 paint();
 setInterval(paint, 1000);
