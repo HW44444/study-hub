@@ -1,5 +1,7 @@
 # Study Hub
 
+**Live site: https://study-hub-9kx.pages.dev**
+
 A study and organization web app I built for myself — assignment tracking, GPA, two kinds of study timers, and a session runner that walks me through a plan I set in advance.
 
 ## Why I built it

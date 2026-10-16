@@ -310,9 +310,14 @@ function startTask() {
     next ? `Up next: ${next.name} (${next.minutes} min)` : "Last task — finish strong.";
 
   // Only show assignment buttons when this task came from one.
+  /* The finish button is ALWAYS available — you can call any task
+     done early. Only the wording changes, and only tasks that came
+     from the assignments sidebar also tick the assignment off. */
   const isAssignment = !!task.assignmentId;
-  document.getElementById("finishAssignBtn").style.display = isAssignment ? "" : "none";
-  document.getElementById("doneAssignBtn").style.display   = isAssignment ? "" : "none";
+  const finishBtn = document.getElementById("finishAssignBtn");
+  finishBtn.style.display = "";
+  finishBtn.textContent = isAssignment ? "✓ Finish assignment" : "✓ Finish task";
+  document.getElementById("doneAssignBtn").style.display = isAssignment ? "" : "none";
 
   startChunk(task.minutes);
 }
@@ -387,12 +392,21 @@ document.getElementById("doneAssignBtn").addEventListener("click", () => {
 /* ---------- Finish an assignment mid-task ---------- */
 document.getElementById("finishAssignBtn").addEventListener("click", async () => {
   const task = currentTask();
-  if (!task.assignmentId) return;
-  if (!await uiConfirm(`Mark "${task.name}" complete and move on?`, "Finish assignment", "Finish")) return;
+  const linked = !!task.assignmentId;
+
+  const ok = await uiConfirm(
+    linked
+      ? `Mark "${task.name}" complete and move on?`
+      : `Finish "${task.name}" early and move on?`,
+    linked ? "Finish assignment" : "Finish task",
+    "Finish"
+  );
+  if (!ok) return;
 
   // Credit the part of this chunk you actually did.
   minutesDone += Math.max(0, chunkMinutes - Math.ceil(remaining / 60));
-  completeAssignment(task.assignmentId);
+  if (linked) completeAssignment(task.assignmentId);
+  clearInterval(ticker);
   advance();
 });
 
