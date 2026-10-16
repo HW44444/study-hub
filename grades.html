@@ -16,6 +16,7 @@
     <a href="testtime.html">Test Time</a>
     <a href="assignments.html">Assignments</a>
     <a href="grades.html">Grades</a>
+    <a href="clock.html">Class clock</a>
   </div>
 </nav>
 
@@ -57,6 +58,15 @@
         <option value="ap">AP</option>
       </select>
 
+      <label class="sr-only" for="cperiod">Period</label>
+      <select id="cperiod">
+        <option value="">No period</option>
+        <option value="A1">A1</option><option value="A2">A2</option>
+        <option value="A3">A3</option><option value="A4">A4</option>
+        <option value="B5">B5</option><option value="B6">B6</option>
+        <option value="B7">B7</option><option value="B8">B8</option>
+      </select>
+
       <button id="add">Add class</button>
     </div>
   </div>
@@ -64,6 +74,7 @@
 
 <script src="storage.js"></script>
 <script src="ui.js"></script>
+<script src="schedule.js"></script>
 <script>
 const GRADE_POINTS = {
   "A+":4.0,"A":4.0,"A-":3.7,
@@ -76,6 +87,10 @@ const WEIGHT = { regular:0.0, honors:0.5, ap:1.0 };
 const LABEL  = { regular:"Regular", honors:"Honors", ap:"AP" };
 const GRADES = Object.keys(GRADE_POINTS);
 const TYPES  = Object.keys(WEIGHT);
+/* A days run periods A1-A4, B days run B5-B8. Tagging a class
+   with its period is what lets the Class Clock know which class
+   you're actually in right now. */
+const PERIODS = ["A1", "A2", "A3", "A4", "B5", "B6", "B7", "B8"];
 
 let classes = load(KEYS.classes, []);
 
@@ -105,6 +120,8 @@ function render() {
       `<option ${g === c.grade ? "selected" : ""}>${g}</option>`).join("");
     const typeOpts = TYPES.map(t =>
       `<option value="${t}" ${t === c.type ? "selected" : ""}>${LABEL[t]}</option>`).join("");
+    const periodOpts = `<option value="">—</option>` + PERIODS.map(p =>
+      `<option value="${p}" ${p === c.period ? "selected" : ""}>${p}</option>`).join("");
 
     const row = document.createElement("div");
     row.className = "item";
@@ -113,6 +130,7 @@ function render() {
         <div class="title">${escapeHtml(c.name)}</div>
         <div class="meta">${base.toFixed(1)} pts${bonus ? " + " + bonus + " weighted" : ""}</div>
       </div>
+      <select class="inline" data-period="${c.id}" aria-label="Period for ${escapeHtml(c.name)}">${periodOpts}</select>
       <select class="inline" data-grade="${c.id}" aria-label="Grade for ${escapeHtml(c.name)}">${gradeOpts}</select>
       <select class="inline" data-type="${c.id}" aria-label="Course type for ${escapeHtml(c.name)}">${typeOpts}</select>
       <button class="danger" data-del="${c.id}" aria-label="Remove ${escapeHtml(c.name)}">✕</button>`;
@@ -137,7 +155,8 @@ async function add() {
     id: uid(),
     name: name,
     grade: document.getElementById("cgrade").value,
-    type: document.getElementById("ctype").value
+    type: document.getElementById("ctype").value,
+    period: document.getElementById("cperiod").value || null
   });
 
   // Reset the form back to its defaults so the next entry
@@ -145,6 +164,7 @@ async function add() {
   nameEl.value = "";
   document.getElementById("cgrade").value = "A";
   document.getElementById("ctype").value = "regular";
+  document.getElementById("cperiod").value = "";
   nameEl.focus();
 
   render();
@@ -156,12 +176,13 @@ async function add() {
    class it belongs to from the data- attribute and update it. */
 document.getElementById("list").addEventListener("change", e => {
   const el = e.target;
-  const id = el.dataset.grade || el.dataset.type;
+  const id = el.dataset.grade || el.dataset.type || el.dataset.period;
   if (!id) return;
   const cls = classes.find(c => c.id === id);
   if (!cls) return;
-  if (el.dataset.grade) cls.grade = el.value;
-  if (el.dataset.type)  cls.type  = el.value;
+  if (el.dataset.grade)  cls.grade  = el.value;
+  if (el.dataset.type)   cls.type   = el.value;
+  if (el.dataset.period) cls.period = el.value || null;
   render();
 });
 

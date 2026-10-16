@@ -1,0 +1,234 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Study Hub — Class Clock</title>
+<link rel="stylesheet" href="style.css">
+</head>
+<body>
+
+<nav>
+  <a class="logo" href="index.html">📚 Study Hub</a>
+  <div class="links">
+    <a href="index.html">Dashboard</a>
+    <a href="planner.html">Session</a>
+    <a href="testtime.html">Test Time</a>
+    <a href="assignments.html">Assignments</a>
+    <a href="grades.html">Grades</a>
+    <a href="clock.html">Class clock</a>
+  </div>
+</nav>
+
+<main>
+  <h1>Class clock</h1>
+  <p class="sub" id="todayLine"></p>
+
+  <!-- ===== Live status ===== -->
+  <div class="panel runner" style="padding:26px 18px;">
+    <div class="task" id="nowLabel">—</div>
+    <div class="clock" id="bigClock">--:--</div>
+    <div class="bar"><div id="barFill"></div></div>
+    <div class="upnext" id="endsAt"></div>
+    <div class="upnext" id="nextUp" style="margin-top:4px;"></div>
+  </div>
+
+  <!-- ===== Today's blocks ===== -->
+  <div class="panel">
+    <h2>Today</h2>
+    <div id="dayList"></div>
+  </div>
+
+  <!-- ===== A/B day ===== -->
+  <div class="panel">
+    <h2>A / B rotation</h2>
+    <p class="sub" id="rotationNote" style="margin-bottom:12px;"></p>
+    <div class="row">
+      <button class="ghost" id="setA">Today is an A day</button>
+      <button class="ghost" id="setB">Today is a B day</button>
+    </div>
+    <p class="hint" style="margin-top:10px;">
+      Days alternate automatically from here. If a holiday throws it off, tap the correct one and it re-syncs.
+    </p>
+  </div>
+
+  <!-- ===== Period times ===== -->
+  <div class="panel">
+    <h2>Period times</h2>
+    <p class="sub" style="margin-bottom:12px;">
+      Your bell schedule. Slot 1–4 are your class periods (A1–A4 on A days, B5–B8 on B days). Leave the slot blank for lunch or study hall.
+    </p>
+    <div id="blockEditor"></div>
+    <div class="row" style="margin-top:14px;">
+      <button id="addBlock">+ Add block</button>
+      <button class="ghost" id="resetBlocks">Reset to default</button>
+    </div>
+  </div>
+</main>
+
+<script src="storage.js"></script>
+<script src="ui.js"></script>
+<script src="schedule.js"></script>
+<script>
+let sched = loadSchedule();
+
+/* ===================== LIVE STATUS ===================== */
+function paint() {
+  const now = new Date();
+  const st = scheduleStatus(now);
+
+  document.getElementById("todayLine").textContent =
+    now.toLocaleDateString(undefined, { weekday: "long", month: "long", day: "numeric" }) +
+    (st.dayType ? ` · ${st.dayType} day` : "");
+
+  const nowLabel = document.getElementById("nowLabel");
+  const bigClock = document.getElementById("bigClock");
+  const endsAt   = document.getElementById("endsAt");
+  const nextUp   = document.getElementById("nextUp");
+  const bar      = document.getElementById("barFill");
+
+  if (st.state === "in") {
+    nowLabel.textContent = st.block.title;
+    bigClock.textContent = countdownText(st.endsIn);
+    endsAt.textContent   = `Ends at ${toClockLabel(toMinutes(st.block.end))}`;
+    nextUp.textContent   = st.next
+      ? `Next: ${st.next.title} at ${toClockLabel(toMinutes(st.next.start))}`
+      : "Last block of the day.";
+    const total = st.block.endSec - st.block.startSec;
+    bar.style.width = (((total - st.endsIn) / total) * 100) + "%";
+
+  } else if (st.state === "passing" || st.state === "before") {
+    nowLabel.textContent = st.state === "before" ? "Before school" : "Passing period";
+    bigClock.textContent = countdownText(st.startsIn);
+    endsAt.textContent   = `${st.next.title} starts at ${toClockLabel(toMinutes(st.next.start))}`;
+    nextUp.textContent   = "";
+    bar.style.width = "0%";
+
+  } else if (st.state === "after") {
+    nowLabel.textContent = "School's out";
+    bigClock.textContent = "--:--";
+    endsAt.textContent   = "Nothing left today.";
+    nextUp.textContent   = "";
+    bar.style.width = "100%";
+
+  } else {
+    nowLabel.textContent = "No school";
+    bigClock.textContent = "--:--";
+    endsAt.textContent   = st.reason || "";
+    nextUp.textContent   = "";
+    bar.style.width = "0%";
+  }
+
+  renderDay(st);
+  document.getElementById("rotationNote").textContent = st.dayType
+    ? `Today is an ${st.dayType} day.`
+    : sched.anchorDate
+      ? "No school today, so there's no A/B day."
+      : "Not set yet — tap whichever today is.";
+}
+
+function renderDay(st) {
+  const list = document.getElementById("dayList");
+  if (!st.blocks) { list.innerHTML = `<p class="empty">Nothing scheduled.</p>`; return; }
+
+  const nowSec = new Date().getHours() * 3600 + new Date().getMinutes() * 60;
+
+  list.innerHTML = st.blocks.map(b => {
+    const isNow  = st.state === "in" && st.block.start === b.start;
+    const isPast = b.endSec <= nowSec;
+    return `
+      <div class="item" style="${isPast && !isNow ? "opacity:.45;" : ""}">
+        <div class="grow">
+          <div class="title">${escapeHtml(b.title)}${isNow ? ` <span class="pill ok">now</span>` : ""}</div>
+          <div class="meta">${escapeHtml(b.label)}${b.code ? " · " + b.code : ""}</div>
+        </div>
+        <span class="meta">${toClockLabel(toMinutes(b.start))} – ${toClockLabel(toMinutes(b.end))}</span>
+      </div>`;
+  }).join("");
+}
+
+/* ===================== A / B ANCHOR ===================== */
+function setToday(type) {
+  sched.anchorDate = new Date().toISOString().slice(0, 10);
+  sched.anchorType = type;
+  saveSchedule(sched);
+  paint();
+  uiToast(`Today set as ${type} day`, "good");
+}
+document.getElementById("setA").addEventListener("click", () => setToday("A"));
+document.getElementById("setB").addEventListener("click", () => setToday("B"));
+
+/* ===================== BLOCK EDITOR ===================== */
+function renderEditor() {
+  const wrap = document.getElementById("blockEditor");
+  wrap.innerHTML = sched.blocks.map((b, i) => `
+    <div class="item">
+      <input type="text" value="${escapeHtml(b.label)}" data-label="${i}"
+             aria-label="Block name" style="flex:1.4; min-width:110px;">
+      <input type="time" value="${b.start}" data-start="${i}" aria-label="Start time">
+      <input type="time" value="${b.end}" data-end="${i}" aria-label="End time">
+      <select data-slot="${i}" aria-label="Class slot" style="width:92px;">
+        <option value="">—</option>
+        <option value="1" ${b.slot === 1 ? "selected" : ""}>Slot 1</option>
+        <option value="2" ${b.slot === 2 ? "selected" : ""}>Slot 2</option>
+        <option value="3" ${b.slot === 3 ? "selected" : ""}>Slot 3</option>
+        <option value="4" ${b.slot === 4 ? "selected" : ""}>Slot 4</option>
+      </select>
+      <button class="danger" data-delblock="${i}" aria-label="Remove block">✕</button>
+    </div>`).join("");
+}
+
+document.getElementById("blockEditor").addEventListener("change", e => {
+  const el = e.target;
+  const i = el.dataset.label ?? el.dataset.start ?? el.dataset.end ?? el.dataset.slot;
+  if (i === undefined) return;
+  const b = sched.blocks[+i];
+  if (!b) return;
+
+  if (el.dataset.label !== undefined) b.label = el.value.trim() || "Block";
+  if (el.dataset.start !== undefined) b.start = el.value;
+  if (el.dataset.end   !== undefined) b.end   = el.value;
+  if (el.dataset.slot  !== undefined) b.slot  = el.value ? +el.value : null;
+
+  sched.blocks.sort((x, y) => toMinutes(x.start) - toMinutes(y.start));
+  saveSchedule(sched);
+  renderEditor();
+  paint();
+});
+
+document.getElementById("blockEditor").addEventListener("click", async e => {
+  const btn = e.target.closest("button[data-delblock]");
+  if (!btn) return;
+  const b = sched.blocks[+btn.dataset.delblock];
+  if (await uiConfirm(`Remove "${b.label}" from your schedule?`, "Remove block", "Remove")) {
+    sched.blocks.splice(+btn.dataset.delblock, 1);
+    saveSchedule(sched);
+    renderEditor();
+    paint();
+  }
+});
+
+document.getElementById("addBlock").addEventListener("click", () => {
+  sched.blocks.push({ label: "New block", start: "15:30", end: "16:00", slot: null });
+  saveSchedule(sched);
+  renderEditor();
+  paint();
+});
+
+document.getElementById("resetBlocks").addEventListener("click", async () => {
+  if (await uiConfirm("Reset period times back to the defaults?", "Reset schedule", "Reset")) {
+    sched.blocks = JSON.parse(JSON.stringify(DEFAULT_SCHEDULE.blocks));
+    saveSchedule(sched);
+    renderEditor();
+    paint();
+    uiToast("Schedule reset");
+  }
+});
+
+/* ===================== INIT ===================== */
+renderEditor();
+paint();
+setInterval(paint, 1000);
+</script>
+</body>
+</html>
