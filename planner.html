@@ -443,6 +443,14 @@ async function finish() {
   document.getElementById("runMode").style.display = "none";
   document.getElementById("buildMode").style.display = "block";
 
+  /* Clear out what you got through. `index` is however far the
+     session reached, so everything before it is done and gets
+     dropped. Finish the whole plan and this leaves it empty;
+     end early and the tasks you never reached are still there. */
+  const leftover = plan.length - index;
+  plan = plan.slice(index);
+  renderPlan();
+
   // Anything you studied but didn't explicitly finish.
   const pending = assignments.filter(a => finishedAssignments.has(a.id) && !a.done);
   if (pending.length) {
@@ -460,7 +468,13 @@ async function finish() {
     }
   }
 
-  await uiAlert(`You studied ${formatMinutes(minutesDone)}.`, "Session complete");
+  await uiAlert(
+    `You studied ${formatMinutes(minutesDone)}.` +
+    (leftover > 0
+      ? ` ${leftover} task${leftover === 1 ? "" : "s"} left in your plan.`
+      : " Your plan is clear."),
+    "Session complete"
+  );
 }
 
 function beep() {
