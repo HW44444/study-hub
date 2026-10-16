@@ -92,8 +92,16 @@ function daysUntil(iso) {
   return Math.round((target - today) / 86400000);
 }
 
+/* Always build date strings from LOCAL parts.
+   toISOString() converts to UTC first, so in Oregon anything
+   after about 5pm would come out as tomorrow's date — which
+   would log evening study time to the wrong day. */
+function localISO(d = new Date()) {
+  return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, "0")}-${String(d.getDate()).padStart(2, "0")}`;
+}
+
 function todayISO() {
-  return new Date().toISOString().slice(0, 10);
+  return localISO(new Date());
 }
 
 /* ---------- Study time log ---------- */
@@ -118,7 +126,7 @@ function weekStartISO() {
   // getDay(): Sun=0 … Sat=6.  This gives days since last Saturday.
   const daysSinceSaturday = (d.getDay() + 1) % 7;
   d.setDate(d.getDate() - daysSinceSaturday);
-  return d.toISOString().slice(0, 10);
+  return localISO(d);
 }
 
 // Minutes studied since the week started (Saturday).

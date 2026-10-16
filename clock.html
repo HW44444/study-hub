@@ -21,11 +21,16 @@
 </nav>
 
 <main>
-  <h1>Class clock</h1>
-  <p class="sub" id="todayLine"></p>
+  <div class="row" style="justify-content:space-between; align-items:flex-start;">
+    <div>
+      <h1>Class clock</h1>
+      <p class="sub" id="todayLine"></p>
+    </div>
+    <button class="ghost" id="toggleClock">Turn off</button>
+  </div>
 
   <!-- ===== Live status ===== -->
-  <div class="panel runner" style="padding:26px 18px;">
+  <div class="panel runner" style="padding:26px 18px;" id="statusPanel">
     <div class="task" id="nowLabel">—</div>
     <div class="clock" id="bigClock">--:--</div>
     <div class="bar"><div id="barFill"></div></div>
@@ -34,12 +39,15 @@
   </div>
 
   <!-- ===== Today's blocks ===== -->
-  <div class="panel">
-    <h2>Today</h2>
-    <div id="dayList"></div>
+  <div class="panel" id="todayPanel">
+    <div class="row" style="justify-content:space-between;">
+      <h2 style="margin:0;">Today</h2>
+      <span class="meta" id="todaySchedName" style="color:var(--muted);"></span>
+    </div>
+    <div id="dayList" style="margin-top:10px;"></div>
   </div>
 
-  <!-- ===== A/B day ===== -->
+  <!-- ===== A/B rotation ===== -->
   <div class="panel">
     <h2>A / B rotation</h2>
     <p class="sub" id="rotationNote" style="margin-bottom:12px;"></p>
@@ -48,20 +56,36 @@
       <button class="ghost" id="setB">Today is a B day</button>
     </div>
     <p class="hint" style="margin-top:10px;">
-      Days alternate automatically from here. If a holiday throws it off, tap the correct one and it re-syncs.
+      Days alternate automatically from here, skipping weekends. If a holiday throws it off, tap the right one and it re-syncs.
     </p>
   </div>
 
-  <!-- ===== Period times ===== -->
+  <!-- ===== Custom day ===== -->
   <div class="panel">
-    <h2>Period times</h2>
+    <h2>Different schedule today?</h2>
     <p class="sub" style="margin-bottom:12px;">
-      Your bell schedule. Slot 1–4 are your class periods (A1–A4 on A days, B5–B8 on B days). Leave the slot blank for lunch or study hall.
+      Assembly, testing, late start — build a one-off schedule that replaces today only. Your normal week stays untouched.
     </p>
+    <div class="row">
+      <button id="makeCustom">Use a custom schedule today</button>
+      <button class="ghost" id="clearCustom" style="display:none;">Remove custom schedule</button>
+    </div>
+  </div>
+
+  <!-- ===== Schedule editor ===== -->
+  <div class="panel">
+    <h2>Bell schedules</h2>
+    <p class="sub" style="margin-bottom:12px;">
+      Slot 1–4 are your class periods (A1–A4 on A days, B5–B8 on B days). Leave the slot blank for lunch, seminar, or PLC.
+    </p>
+    <div class="row" style="margin-bottom:12px;">
+      <label class="sr-only" for="whichSched">Schedule to edit</label>
+      <select id="whichSched" style="flex:1; min-width:220px;"></select>
+    </div>
     <div id="blockEditor"></div>
     <div class="row" style="margin-top:14px;">
       <button id="addBlock">+ Add block</button>
-      <button class="ghost" id="resetBlocks">Reset to default</button>
+      <button class="ghost" id="resetBlocks">Reset this schedule</button>
     </div>
   </div>
 </main>
@@ -71,15 +95,18 @@
 <script src="schedule.js"></script>
 <script>
 let sched = loadSchedule();
+let editing = "auto";   // which schedule the editor is showing
 
 /* ===================== LIVE STATUS ===================== */
 function paint() {
   const now = new Date();
   const st = scheduleStatus(now);
 
+  document.getElementById("toggleClock").textContent = sched.enabled ? "Turn off" : "Turn on";
+
+  const dateStr = now.toLocaleDateString(undefined, { weekday: "long", month: "long", day: "numeric" });
   document.getElementById("todayLine").textContent =
-    now.toLocaleDateString(undefined, { weekday: "long", month: "long", day: "numeric" }) +
-    (st.dayType ? ` · ${st.dayType} day` : "");
+    dateStr + (st.dayType ? ` · ${st.dayType} day` : "");
 
   const nowLabel = document.getElementById("nowLabel");
   const bigClock = document.getElementById("bigClock");
@@ -87,7 +114,14 @@ function paint() {
   const nextUp   = document.getElementById("nextUp");
   const bar      = document.getElementById("barFill");
 
-  if (st.state === "in") {
+  if (st.state === "off") {
+    nowLabel.textContent = "Class clock is off";
+    bigClock.textContent = "--:--";
+    endsAt.textContent   = "Turn it back on to see your periods.";
+    nextUp.textContent   = "";
+    bar.style.width = "0%";
+
+  } else if (st.state === "in") {
     nowLabel.textContent = st.block.title;
     bigClock.textContent = countdownText(st.endsIn);
     endsAt.textContent   = `Ends at ${toClockLabel(toMinutes(st.block.end))}`;
@@ -119,22 +153,33 @@ function paint() {
     bar.style.width = "0%";
   }
 
+  document.getElementById("todaySchedName").textContent =
+    st.scheduleName ? (st.custom ? st.scheduleName + " (custom)" : st.scheduleName) : "";
+
   renderDay(st);
+
   document.getElementById("rotationNote").textContent = st.dayType
     ? `Today is an ${st.dayType} day.`
-    : sched.anchorDate
-      ? "No school today, so there's no A/B day."
-      : "Not set yet — tap whichever today is.";
+    : sched.anchorDate ? "No school today, so there's no A/B day."
+                       : "Not set yet — tap whichever today is.";
+
+  const hasCustom = sched.override && sched.override.date === localISO(now);
+  document.getElementById("clearCustom").style.display = hasCustom ? "" : "none";
+  document.getElementById("makeCustom").textContent =
+    hasCustom ? "Edit today's custom schedule" : "Use a custom schedule today";
 }
 
 function renderDay(st) {
   const list = document.getElementById("dayList");
-  if (!st.blocks) { list.innerHTML = `<p class="empty">Nothing scheduled.</p>`; return; }
-
-  const nowSec = new Date().getHours() * 3600 + new Date().getMinutes() * 60;
+  if (!st.blocks || st.blocks.length === 0) {
+    list.innerHTML = `<p class="empty">Nothing scheduled.</p>`;
+    return;
+  }
+  const now = new Date();
+  const nowSec = now.getHours() * 3600 + now.getMinutes() * 60 + now.getSeconds();
 
   list.innerHTML = st.blocks.map(b => {
-    const isNow  = st.state === "in" && st.block.start === b.start;
+    const isNow  = st.state === "in" && st.block.start === b.start && st.block.label === b.label;
     const isPast = b.endSec <= nowSec;
     return `
       <div class="item" style="${isPast && !isNow ? "opacity:.45;" : ""}">
@@ -147,9 +192,17 @@ function renderDay(st) {
   }).join("");
 }
 
+/* ===================== ON / OFF ===================== */
+document.getElementById("toggleClock").addEventListener("click", () => {
+  sched.enabled = !sched.enabled;
+  saveSchedule(sched);
+  paint();
+  uiToast(sched.enabled ? "Class clock on" : "Class clock off");
+});
+
 /* ===================== A / B ANCHOR ===================== */
 function setToday(type) {
-  sched.anchorDate = new Date().toISOString().slice(0, 10);
+  sched.anchorDate = localISO(new Date());
   sched.anchorType = type;
   saveSchedule(sched);
   paint();
@@ -158,16 +211,88 @@ function setToday(type) {
 document.getElementById("setA").addEventListener("click", () => setToday("A"));
 document.getElementById("setB").addEventListener("click", () => setToday("B"));
 
-/* ===================== BLOCK EDITOR ===================== */
+/* ===================== CUSTOM DAY ===================== */
+document.getElementById("makeCustom").addEventListener("click", () => {
+  const today = localISO(new Date());
+  if (!sched.override || sched.override.date !== today) {
+    // Start from whatever today would normally be, so you're editing, not starting blank.
+    const base = blocksForDate(new Date());
+    sched.override = {
+      date: today,
+      name: "Custom schedule",
+      blocks: base ? JSON.parse(JSON.stringify(base.blocks)) : []
+    };
+    saveSchedule(sched);
+    uiToast("Custom schedule created for today", "good");
+  }
+  editing = "override";
+  fillSchedPicker();
+  renderEditor();
+  paint();
+  document.getElementById("blockEditor").scrollIntoView({ behavior: "smooth", block: "center" });
+});
+
+document.getElementById("clearCustom").addEventListener("click", async () => {
+  if (await uiConfirm("Remove today's custom schedule and go back to the normal one?", "Remove custom", "Remove")) {
+    sched.override = null;
+    if (editing === "override") editing = "auto";
+    saveSchedule(sched);
+    fillSchedPicker();
+    renderEditor();
+    paint();
+    uiToast("Back to the normal schedule");
+  }
+});
+
+/* ===================== EDITOR ===================== */
+function fillSchedPicker() {
+  const sel = document.getElementById("whichSched");
+  const opts = [`<option value="auto">Today's schedule</option>`];
+  Object.keys(sched.templates).forEach(k => {
+    opts.push(`<option value="${k}">${escapeHtml(sched.templates[k].name)}</option>`);
+  });
+  if (sched.override && sched.override.date === localISO(new Date())) {
+    opts.push(`<option value="override">Today's custom schedule</option>`);
+  }
+  sel.innerHTML = opts.join("");
+  sel.value = editing;
+  if (sel.value !== editing) { editing = "auto"; sel.value = "auto"; }
+}
+
+/* Which array of blocks the editor is currently pointed at. */
+function editingBlocks() {
+  if (editing === "override" && sched.override) return sched.override.blocks;
+  if (editing !== "auto" && sched.templates[editing]) return sched.templates[editing].blocks;
+
+  // "auto" = whatever applies today
+  const today = localISO(new Date());
+  if (sched.override && sched.override.date === today) return sched.override.blocks;
+  const key = templateKeyForDate(new Date());
+  if (key && sched.templates[key]) return sched.templates[key].blocks;
+  return null;
+}
+
+document.getElementById("whichSched").addEventListener("change", e => {
+  editing = e.target.value;
+  renderEditor();
+});
+
 function renderEditor() {
   const wrap = document.getElementById("blockEditor");
-  wrap.innerHTML = sched.blocks.map((b, i) => `
+  const blocks = editingBlocks();
+
+  if (!blocks) {
+    wrap.innerHTML = `<p class="empty">No schedule today (weekend). Pick a specific one above to edit it.</p>`;
+    return;
+  }
+
+  wrap.innerHTML = blocks.map((b, i) => `
     <div class="item">
       <input type="text" value="${escapeHtml(b.label)}" data-label="${i}"
-             aria-label="Block name" style="flex:1.4; min-width:110px;">
+             aria-label="Block name" style="flex:1.4; min-width:120px;">
       <input type="time" value="${b.start}" data-start="${i}" aria-label="Start time">
       <input type="time" value="${b.end}" data-end="${i}" aria-label="End time">
-      <select data-slot="${i}" aria-label="Class slot" style="width:92px;">
+      <select data-slot="${i}" aria-label="Class slot" style="width:94px;">
         <option value="">—</option>
         <option value="1" ${b.slot === 1 ? "selected" : ""}>Slot 1</option>
         <option value="2" ${b.slot === 2 ? "selected" : ""}>Slot 2</option>
@@ -180,9 +305,10 @@ function renderEditor() {
 
 document.getElementById("blockEditor").addEventListener("change", e => {
   const el = e.target;
-  const i = el.dataset.label ?? el.dataset.start ?? el.dataset.end ?? el.dataset.slot;
-  if (i === undefined) return;
-  const b = sched.blocks[+i];
+  const idx = el.dataset.label ?? el.dataset.start ?? el.dataset.end ?? el.dataset.slot;
+  if (idx === undefined) return;
+  const blocks = editingBlocks();
+  const b = blocks && blocks[+idx];
   if (!b) return;
 
   if (el.dataset.label !== undefined) b.label = el.value.trim() || "Block";
@@ -190,7 +316,7 @@ document.getElementById("blockEditor").addEventListener("change", e => {
   if (el.dataset.end   !== undefined) b.end   = el.value;
   if (el.dataset.slot  !== undefined) b.slot  = el.value ? +el.value : null;
 
-  sched.blocks.sort((x, y) => toMinutes(x.start) - toMinutes(y.start));
+  blocks.sort((x, y) => toMinutes(x.start) - toMinutes(y.start));
   saveSchedule(sched);
   renderEditor();
   paint();
@@ -199,9 +325,10 @@ document.getElementById("blockEditor").addEventListener("change", e => {
 document.getElementById("blockEditor").addEventListener("click", async e => {
   const btn = e.target.closest("button[data-delblock]");
   if (!btn) return;
-  const b = sched.blocks[+btn.dataset.delblock];
-  if (await uiConfirm(`Remove "${b.label}" from your schedule?`, "Remove block", "Remove")) {
-    sched.blocks.splice(+btn.dataset.delblock, 1);
+  const blocks = editingBlocks();
+  const b = blocks[+btn.dataset.delblock];
+  if (await uiConfirm(`Remove "${b.label}" from this schedule?`, "Remove block", "Remove")) {
+    blocks.splice(+btn.dataset.delblock, 1);
     saveSchedule(sched);
     renderEditor();
     paint();
@@ -209,15 +336,24 @@ document.getElementById("blockEditor").addEventListener("click", async e => {
 });
 
 document.getElementById("addBlock").addEventListener("click", () => {
-  sched.blocks.push({ label: "New block", start: "15:30", end: "16:00", slot: null });
+  const blocks = editingBlocks();
+  if (!blocks) { uiToast("Pick a schedule to edit first", "bad"); return; }
+  blocks.push({ label: "New block", start: "15:30", end: "16:00", slot: null });
+  blocks.sort((x, y) => toMinutes(x.start) - toMinutes(y.start));
   saveSchedule(sched);
   renderEditor();
   paint();
 });
 
 document.getElementById("resetBlocks").addEventListener("click", async () => {
-  if (await uiConfirm("Reset period times back to the defaults?", "Reset schedule", "Reset")) {
-    sched.blocks = JSON.parse(JSON.stringify(DEFAULT_SCHEDULE.blocks));
+  let key = editing;
+  if (key === "auto") key = templateKeyForDate(new Date());
+  if (!key || key === "override" || !DEFAULT_TEMPLATES[key]) {
+    uiToast("Pick one of the weekly schedules to reset", "bad");
+    return;
+  }
+  if (await uiConfirm(`Reset "${sched.templates[key].name}" to the default bell times?`, "Reset schedule", "Reset")) {
+    sched.templates[key].blocks = JSON.parse(JSON.stringify(DEFAULT_TEMPLATES[key].blocks));
     saveSchedule(sched);
     renderEditor();
     paint();
@@ -226,6 +362,7 @@ document.getElementById("resetBlocks").addEventListener("click", async () => {
 });
 
 /* ===================== INIT ===================== */
+fillSchedPicker();
 renderEditor();
 paint();
 setInterval(paint, 1000);
