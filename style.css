@@ -135,6 +135,13 @@ button.danger-solid{background:var(--bad);}
 .toast.bad{border-color:var(--bad);}
 .toast.leaving{opacity:0; transition:opacity .3s;}
 
+/* Running-session widget in the nav — click to jump back */
+.sessionwidget{margin-left:12px; background:var(--accent); border:1px solid var(--accent);
+  color:#fff; font-size:12.5px; padding:5px 12px; border-radius:20px;
+  white-space:nowrap; font-weight:500; font-variant-numeric:tabular-nums;}
+.sessionwidget:hover{filter:brightness(1.1); color:#fff;}
+.sessionwidget.urgent{background:var(--warn); border-color:var(--warn); color:#2a1e03;}
+
 /* Class-clock widget in the nav corner */
 .classwidget{margin-left:16px; background:var(--panel2); border:1px solid var(--border);
   color:var(--muted); font-size:12.5px; padding:5px 11px; border-radius:20px;

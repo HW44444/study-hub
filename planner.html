@@ -140,6 +140,7 @@
 <script src="storage.js"></script>
 <script src="ui.js"></script>
 <script src="schedule.js"></script>
+<script src="session.js"></script>
 <script>
 /* ===================== STATE ===================== */
 let plan        = load(KEYS.plan, []);
@@ -296,14 +297,30 @@ document.getElementById("startBtn").addEventListener("click", () => {
   index = 0;
   minutesDone = 0;
   finishedAssignments = new Set();
-  document.getElementById("buildMode").style.display = "none";
-  document.getElementById("runMode").style.display = "block";
+  enterRunMode();
   startTask();
 });
 
 function currentTask() { return plan[index]; }
 
-function startTask() {
+function enterRunMode() {
+  document.getElementById("buildMode").style.display = "none";
+  document.getElementById("runMode").style.display = "block";
+}
+
+/* Save the whole session. Called on every state change, so
+   another page — or a reload — can pick it up exactly as it is. */
+function persist() {
+  saveSession({
+    active: true,
+    index, chunkMinutes, endTime, paused, remaining, awaiting, minutesDone,
+    finished: [...finishedAssignments]
+  });
+}
+
+/* Labels that depend on which task we're on. Split out so both
+   starting a task and restoring one can reuse it. */
+function paintTaskLabels() {
   const task = currentTask();
   document.getElementById("curTask").textContent = task.name;
 
@@ -311,7 +328,6 @@ function startTask() {
   document.getElementById("upNext").textContent =
     next ? `Up next: ${next.name} (${next.minutes} min)` : "Last task — finish strong.";
 
-  // Only show assignment buttons when this task came from one.
   /* The finish button is ALWAYS available — you can call any task
      done early. Only the wording changes, and only tasks that came
      from the assignments sidebar also tick the assignment off. */
@@ -320,8 +336,11 @@ function startTask() {
   finishBtn.style.display = "";
   finishBtn.textContent = isAssignment ? "✓ Finish assignment" : "✓ Finish task";
   document.getElementById("doneAssignBtn").style.display = isAssignment ? "" : "none";
+}
 
-  startChunk(task.minutes);
+function startTask() {
+  paintTaskLabels();
+  startChunk(currentTask().minutes);
 }
 
 /* A "chunk" is one stretch of counting down — either the task's
@@ -337,6 +356,7 @@ function startChunk(minutes) {
   document.getElementById("runControls").style.display = "flex";
   document.getElementById("timesUp").style.display = "none";
 
+  persist();
   clearInterval(ticker);
   ticker = setInterval(tick, 250);
   tick();
@@ -356,11 +376,49 @@ function timeUp() {
   minutesDone += chunkMinutes;          // credit the time that just elapsed
   const task = currentTask();
   if (task.assignmentId) finishedAssignments.add(task.assignmentId);
+  persist();
   beep();
   draw();
+  showTimesUp();
+  document.title = `0:00 — ${task.name}`;
+}
+
+function showTimesUp() {
   document.getElementById("runControls").style.display = "none";
   document.getElementById("timesUp").style.display = "block";
-  document.title = `0:00 — ${task.name}`;
+}
+
+/* Pick a session back up after navigating away or reloading. */
+function restoreSession() {
+  const s = loadSession();
+  if (!s || !s.active) return false;
+  // If the plan changed underneath it, don't guess — drop it.
+  if (!plan.length || s.index >= plan.length) { clearSession(); return false; }
+
+  index        = s.index;
+  chunkMinutes = s.chunkMinutes;
+  endTime      = s.endTime;
+  paused       = !!s.paused;
+  remaining    = s.remaining || 0;
+  awaiting     = !!s.awaiting;
+  minutesDone  = s.minutesDone || 0;
+  finishedAssignments = new Set(s.finished || []);
+
+  enterRunMode();
+  paintTaskLabels();
+
+  if (awaiting) {
+    showTimesUp();
+    draw();
+  } else {
+    document.getElementById("pauseBtn").textContent = paused ? "Resume" : "Pause";
+    document.getElementById("runControls").style.display = "flex";
+    document.getElementById("timesUp").style.display = "none";
+    clearInterval(ticker);
+    ticker = setInterval(tick, 250);
+    tick();   // if it ran out while you were away, this parks it at 0:00
+  }
+  return true;
 }
 
 function draw() {
@@ -418,6 +476,7 @@ function completeAssignment(id) {
   a.done = true;
   save(KEYS.assignments, assignments);
   finishedAssignments.delete(id);   // already handled; don't ask again at the end
+  persist();
   renderAssignSide();
   uiToast(`${a.title} marked complete`, "good");
 }
@@ -433,7 +492,9 @@ function advance() {
 document.getElementById("pauseBtn").addEventListener("click", () => {
   paused = !paused;
   document.getElementById("pauseBtn").textContent = paused ? "Resume" : "Pause";
+  // Resuming: rebuild the end time from whatever was left.
   if (!paused) endTime = Date.now() + remaining * 1000;
+  persist();
 });
 
 document.getElementById("skipBtn").addEventListener("click", () => {
@@ -453,6 +514,7 @@ document.getElementById("endBtn").addEventListener("click", async () => {
 async function finish() {
   clearInterval(ticker);
   awaiting = false;
+  clearSession();          // nothing running any more
   document.title = "Study Hub";
   if (minutesDone > 0) logStudyTime(minutesDone);
 
@@ -510,6 +572,10 @@ function beep() {
 fillSubjects();
 renderAssignSide();
 renderPlan();
+
+/* If a session was running when you navigated away, pick it
+   back up instead of showing the empty planner. */
+restoreSession();
 </script>
 </body>
 </html>
